@@ -292,7 +292,16 @@ class PullReq:
 
     def get_head_comments(self):
         logging.info("loading head comments on %s", self.short())
-        cs = self.src().commits(self.sha).comments().get()
+        more_comments = True
+        cs = []
+        page = 1
+        while more_comments:
+            cs_page = self.src().commits(self.sha).comments().get(page=page)
+            cs.extend(cs_page)
+            if len(cs_page) == 0:
+                more_comments = False
+            page += 1
+
         self.head_comments = [
             (c["created_at"].encode("utf8"),
              c["user"]["login"].encode("utf8"),
@@ -374,6 +383,7 @@ class PullReq:
     def get_mergeable(self):
         logging.info("loading mergeability of %d", self.num)
         self.mergeable = self.dst().pulls(self.num).get()["mergeable"]
+        logging.info("%d is %s", self.num, self.mergeable)
 
     # github lets us externalize states as such:
     #
@@ -630,7 +640,7 @@ class PullReq:
                     t = None
                     main_urls = []
                     extra_urls = []
-                elif len(pending) == len(successes):
+                elif len(pending) <= len(successes):
                     t = True
                     main_urls = [s["target_url"].encode("utf8") for s in successes]
                     extra_urls = []
@@ -645,9 +655,9 @@ class PullReq:
             if t == True:
                 self.log.info("%s - tests passed, marking success", self.short())
                 c = "all tests pass:"
-                for url in main_urls:
+                for url in set(main_urls):
                     c += "\nsuccess: " + url 
-                for url in extra_urls:
+                for url in set(extra_urls):
                     c += "\nwarning: " + url
                 c += "\n"
                 self.add_comment(self.sha, c)
@@ -656,9 +666,9 @@ class PullReq:
             elif t == False:
                 self.log.info("%s - tests failed, marking failure", self.short())
                 c = "some tests failed:"
-                for url in main_urls:
+                for url in set(main_urls):
                     c += "\nfailure: " + url 
-                for url in extra_urls:
+                for url in set(extra_urls):
                     c += "\nexception: " + url
                 c += "\n"
                 self.add_comment(self.sha, c)
@@ -736,8 +746,18 @@ def main():
     repo = cfg["repo"].encode("utf8")
 
     if "collaborators_as_reviewers" in cfg and cfg["collaborators_as_reviewers"] == True:
-        # NOTE there is no paging when listing collaborators
-        collabs = gh.repos(owner)(repo).collaborators().get()
+        more_collabs = True
+        collabs = []
+        page=1
+        while more_collabs:
+            logging.info("loading collaborators reqs (page %d)", page)
+            collabs_page = gh.repos(owner)(repo).collaborators().get(per_page=30,
+                                                  page=page)
+            collabs.extend(collabs_page)
+            if len(collabs_page) == 0:
+                more_collabs = False
+            page += 1
+
         cfg["reviewers"] = [c["login"] for c in collabs]
         logging.info("found %d collaborators", len(collabs))
 
